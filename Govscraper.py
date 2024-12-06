@@ -54,7 +54,7 @@ def get_job_info(driver, id_number):
         print(f"Attempting to find the input field for ID: {id_number}")
 
         # Wait for the input field to be visible with a 1-minute timeout
-        input_field = WebDriverWait(driver, 60).until(
+        input_field = WebDriverWait(driver, 120).until(
             EC.visibility_of_element_located((By.ID, "idNumber"))  # Wait for input field to appear
         )
 
