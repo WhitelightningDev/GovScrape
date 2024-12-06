@@ -26,29 +26,56 @@ def init_driver():
 
 
 # Function to scrape the job information for an ID number
+# Function to monitor changes in a container
+def monitor_container_change(driver, container_selector, previous_content=None):
+    try:
+        container = driver.find_element(By.CSS_SELECTOR, container_selector)
+        current_content = container.get_attribute("outerHTML")  # Get the HTML of the container
+
+        if previous_content and current_content != previous_content:
+            print("Content has changed!")
+            return current_content  # Return new content
+        elif not previous_content:
+            return current_content  # First check, return current content
+        else:
+            print("No changes detected in the container.")
+            return previous_content  # No change detected
+    except NoSuchElementException:
+        print("Container not found!")
+        return previous_content
+    except Exception as e:
+        print(f"Error monitoring container change: {e}")
+        return previous_content
+
+
+# Function to scrape the job information for an ID number
 def get_job_info(driver, id_number):
     try:
         print(f"Attempting to find the input field for ID: {id_number}")
 
-        # Wait for the input field to be visible with 1-minute timeout
+        # Wait for the input field to be visible with a 1-minute timeout
         input_field = WebDriverWait(driver, 60).until(
             EC.visibility_of_element_located((By.ID, "idNumber"))  # Wait for input field to appear
         )
 
         print("Input field found.")
 
+        # Monitor container for changes before interaction
+        previous_content = None
+        previous_content = monitor_container_change(driver, "#content-body", previous_content)
+
         # Find the input field and enter the ID number
         input_field.clear()
         input_field.send_keys(id_number)
 
-        # Find and click the submit button (Verify) with 1-minute timeout
+        # Find and click the submit button (Verify) with a 1-minute timeout
         verify_button = WebDriverWait(driver, 60).until(
             EC.element_to_be_clickable((By.ID, "Inputfield_submit"))  # Button ID for Submit
         )
         print("Submit button found and clicked.")
         verify_button.click()
 
-        # Wait for the response to appear with 1-minute timeout
+        # Wait for the response to appear with a 1-minute timeout
         try:
             print("Waiting for response...")
             WebDriverWait(driver, 60).until(
@@ -56,14 +83,16 @@ def get_job_info(driver, id_number):
                     (By.CSS_SELECTOR, ".uk-text-danger.uk-panel.uk-primary")
                 )  # Wait for the response div containing the text
             )
+
+            # Monitor container for changes after submission
+            previous_content = monitor_container_change(driver, "#content-body", previous_content)
+
             # Check if the text matches the expected response
             response_element = driver.find_element(By.CSS_SELECTOR, ".uk-text-danger.uk-panel.uk-primary")
             if "Not a Public Servant" in response_element.text:
                 print(f"Response for ID {id_number}: {response_element.text}")
-                return response_element.text
             else:
                 print(f"Unexpected response for ID {id_number}: {response_element.text}")
-                return response_element.text
 
         except TimeoutException:
             print(f"Timeout occurred while waiting for response for ID: {id_number}. Attempting a page refresh.")
@@ -74,14 +103,8 @@ def get_job_info(driver, id_number):
         print(f"Current URL after submitting ID: {current_url}")
         time.sleep(5)  # Wait for the page to fully load the response
 
-        # Monitor for state changes by checking the DOM for relevant elements
-        try:
-            WebDriverWait(driver, 60).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, ".uk-text-danger.uk-panel.uk-primary"))
-            )
-            print("State change detected: Response displayed.")
-        except TimeoutException:
-            print(f"Timeout occurred while waiting for state change after ID {id_number}. Checking for issues.")
+        # Monitor container for changes after the page reloads
+        previous_content = monitor_container_change(driver, "#content-body", previous_content)
 
         # Refresh the page after processing the current ID to reset the input field for the next ID
         print(f"Refreshing the page after processing ID {id_number}.")
