@@ -9,7 +9,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.common.exceptions import NoSuchElementException, TimeoutException, WebDriverException
 
-
 # Function to initialize Selenium WebDriver with headless mode
 def init_driver():
     try:
@@ -61,8 +60,10 @@ def get_job_info(driver, id_number):
             response_element = driver.find_element(By.CSS_SELECTOR, ".uk-text-danger.uk-panel.uk-primary")
             if "Not a Public Servant" in response_element.text:
                 print(f"Response for ID {id_number}: {response_element.text}")
+                return response_element.text
             else:
                 print(f"Unexpected response for ID {id_number}: {response_element.text}")
+                return response_element.text
 
         except TimeoutException:
             print(f"Timeout occurred while waiting for response for ID: {id_number}. Attempting a page refresh.")
@@ -116,15 +117,26 @@ def process_ids(input_file, output_file):
         # Initialize Selenium driver
         driver = init_driver()
 
+        # Create a list to hold the results
+        results = []
+
         # Loop through the ID numbers and scrape the data
         for id_number in id_numbers:
             print(f"Processing ID: {id_number}")
             result = get_job_info(driver, id_number)
+            results.append({"ID Number": id_number, "Result": result})
+
             if result == "Error":
                 print(f"Skipping ID: {id_number} due to error.")
             time.sleep(2)  # Adjust the sleep time to allow enough time between searches
 
+        # Save results to an Excel file
+        results_df = pd.DataFrame(results)
+        results_df.to_excel(output_file, index=False)
+        print(f"Results saved to {output_file}")
+
         driver.quit()
+
     except FileNotFoundError as e:
         print(f"Error: The input file was not found. Please check the file path. Error: {e}")
     except PermissionError as e:
