@@ -6,7 +6,6 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.keys import Keys
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.common.exceptions import NoSuchElementException, TimeoutException, WebDriverException
 
@@ -20,6 +19,7 @@ def init_driver():
 
         driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
         driver.get("https://www.dpsa.gov.za/resource_centre/psverification/")
+        print("Page loaded successfully.")
         return driver
     except WebDriverException as e:
         print(f"Error initializing the WebDriver: {e}")
@@ -29,42 +29,78 @@ def init_driver():
 # Function to scrape the job information for an ID number
 def get_job_info(driver, id_number):
     try:
-        # Wait for the input field to be visible
-        input_field = WebDriverWait(driver, 15).until(
+        print(f"Attempting to find the input field for ID: {id_number}")
+
+        # Wait for the input field to be visible with 1-minute timeout
+        input_field = WebDriverWait(driver, 60).until(
             EC.visibility_of_element_located((By.ID, "idNumber"))  # Wait for input field to appear
         )
+
+        print("Input field found.")
 
         # Find the input field and enter the ID number
         input_field.clear()
         input_field.send_keys(id_number)
 
-        # Find and click the submit button (Verify)
-        verify_button = WebDriverWait(driver, 10).until(
+        # Find and click the submit button (Verify) with 1-minute timeout
+        verify_button = WebDriverWait(driver, 60).until(
             EC.element_to_be_clickable((By.ID, "Inputfield_submit"))  # Button ID for Submit
         )
+        print("Submit button found and clicked.")
         verify_button.click()
 
-        # Wait for the response to appear in the form of a state change in the HTML
-        WebDriverWait(driver, 15).until(
-            EC.text_to_be_present_in_element((By.CLASS_NAME, "uk-text-danger"), "Not a Public Servant")
-        )
+        # Wait for the response to appear with 1-minute timeout
+        try:
+            print("Waiting for response...")
+            WebDriverWait(driver, 60).until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, ".uk-text-danger.uk-panel.uk-primary")
+                )  # Wait for the response div containing the text
+            )
+            # Check if the text matches the expected response
+            response_element = driver.find_element(By.CSS_SELECTOR, ".uk-text-danger.uk-panel.uk-primary")
+            if "Not a Public Servant" in response_element.text:
+                print(f"Response for ID {id_number}: {response_element.text}")
+            else:
+                print(f"Unexpected response for ID {id_number}: {response_element.text}")
 
-        # Once the response is detected, refresh the page
+        except TimeoutException:
+            print(f"Timeout occurred while waiting for response for ID: {id_number}. Attempting a page refresh.")
+            driver.refresh()  # Refresh page if timeout occurs
+
+        # Check for any URL or DOM change after clicking the submit button
+        current_url = driver.current_url
+        print(f"Current URL after submitting ID: {current_url}")
+        time.sleep(5)  # Wait for the page to fully load the response
+
+        # Monitor for state changes by checking the DOM for relevant elements
+        try:
+            WebDriverWait(driver, 60).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, ".uk-text-danger.uk-panel.uk-primary"))
+            )
+            print("State change detected: Response displayed.")
+        except TimeoutException:
+            print(f"Timeout occurred while waiting for state change after ID {id_number}. Checking for issues.")
+
+        # Refresh the page after processing the current ID to reset the input field for the next ID
+        print(f"Refreshing the page after processing ID {id_number}.")
         driver.refresh()
 
         # Wait for the page to reload completely before the next ID can be processed
-        WebDriverWait(driver, 15).until(
+        WebDriverWait(driver, 60).until(
             EC.visibility_of_element_located((By.ID, "idNumber"))  # Ensure input field is ready again
         )
-
-        print(f"Processed ID: {id_number}")
+        print("Page refreshed and ready for next ID.")
         return "Processed"
+
     except (NoSuchElementException, TimeoutException) as e:
         print(f"Error while processing ID {id_number}: Element not found or timeout occurred. Error: {e}")
         return "Error"
+
     except WebDriverException as e:
         print(f"WebDriver error while processing ID {id_number}: {e}")
         return "Error"
+
     except Exception as e:
         print(f"Unexpected error while processing ID {id_number}: {e}")
         return "Error"
