@@ -1,4 +1,5 @@
 import time
+
 import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -9,6 +10,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.common.exceptions import NoSuchElementException, TimeoutException, WebDriverException
 import logging
+import re
 
 # Set up logging
 logging.basicConfig(filename="scraping.log", level=logging.INFO, format="%(asctime)s - %(message)s")
@@ -122,12 +124,47 @@ def get_job_info(driver, id_number):
         logging.error(f"Unexpected error while processing ID {id_number}: {e}")
         return "Error: Unexpected error"
 
+
+def get_last_processed_id(log_file):
+    """Reads the scraping log to find the last successfully processed ID."""
+    try:
+        with open(log_file, "r") as f:
+            lines = f.readlines()
+            for line in reversed(lines):  # Read the log file from the end
+                match = re.search(r"Response for ID (\d+):", line)
+                if match:
+                    last_id = match.group(1)
+                    logging.info(f"Last processed ID retrieved from log: {last_id}")
+                    return last_id
+        logging.info("No processed IDs found in log.")
+        return None
+    except FileNotFoundError:
+        logging.warning("Log file not found. Starting from the beginning.")
+        return None
+    except Exception as e:
+        logging.error(f"Error reading log file: {e}")
+        return None
+
 # Function to process the ID numbers and save the result to an Excel file
-def process_ids(input_file, output_file):
+def process_ids(input_file, output_file, log_file="scraping.log"):
     try:
         # Read ID numbers from Excel file
         df = pd.read_excel(input_file)
         id_numbers = df['ID Number'].tolist()
+
+        # Get the last processed ID from the log
+        last_processed_id = get_last_processed_id(log_file)
+
+        # Determine the starting index
+        if last_processed_id:
+            try:
+                start_index = id_numbers.index(int(last_processed_id)) + 1  # Start from the next ID
+                logging.info(f"Resuming from ID {last_processed_id}. Starting at index {start_index}.")
+            except ValueError:
+                logging.warning(f"Last processed ID {last_processed_id} not found in the input file. Starting from the beginning.")
+                start_index = 0
+        else:
+            start_index = 0  # Start from the beginning if no log entry is found
 
         # Initialize Selenium driver
         driver = init_driver()
@@ -135,8 +172,8 @@ def process_ids(input_file, output_file):
         # Create a list to hold the results
         results = []
 
-        # Loop through the ID numbers and scrape the data
-        for id_number in id_numbers:
+        # Loop through the ID numbers starting from the determined index
+        for id_number in id_numbers[start_index:]:
             logging.info(f"Processing ID: {id_number}")
             result = get_job_info(driver, id_number)
             results.append({"ID Number": id_number, "Result": result})
@@ -163,9 +200,10 @@ def process_ids(input_file, output_file):
 if __name__ == "__main__":
     input_file = "idnumber.xlsx"  # Replace with your input Excel file
     output_file = "output_jobs.xlsx"  # Output file to save the results
+    log_file = "scraping.log"  # Path to the log file
 
     try:
-        process_ids(input_file, output_file)
+        process_ids(input_file, output_file, log_file)
         logging.info("Scraping completed.")
     except Exception as e:
         logging.error(f"An error occurred during scraping: {e}")
