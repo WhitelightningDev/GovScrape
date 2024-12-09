@@ -8,127 +8,119 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.common.exceptions import NoSuchElementException, TimeoutException, WebDriverException
+import logging
 
-# Function to initialize Selenium WebDriver with headless mode
+# Set up logging
+logging.basicConfig(filename="scraping.log", level=logging.INFO, format="%(asctime)s - %(message)s")
+
+# Function to initialize Selenium WebDriver without headless mode for debugging
 def init_driver():
     try:
         options = Options()
-        options.add_argument("--headless")  # Run in headless mode (no GUI)
-        options.add_argument("--disable-gpu")  # Disable GPU for smoother running
+        # Disable headless mode for debugging
+        # options.add_argument("--headless")  # Uncomment to enable headless mode for production
+        options.add_argument("--disable-gpu")
+        options.add_argument("--start-maximized")  # Open browser maximized
 
         driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
         driver.get("https://www.dpsa.gov.za/resource_centre/psverification/")
-        print("Page loaded successfully.")
+        logging.info("Page loaded successfully.")
         return driver
     except WebDriverException as e:
-        print(f"Error initializing the WebDriver: {e}")
+        logging.error(f"Error initializing the WebDriver: {e}")
         raise
 
-
-# Function to scrape the job information for an ID number
-# Function to monitor changes in a container
+# Function to monitor changes in the container
 def monitor_container_change(driver, container_selector, previous_content=None):
     try:
         container = driver.find_element(By.CSS_SELECTOR, container_selector)
-        current_content = container.get_attribute("outerHTML")  # Get the HTML of the container
+        current_content = container.get_attribute("outerHTML")
 
         if previous_content and current_content != previous_content:
-            print("Content has changed!")
-            return current_content  # Return new content
+            logging.info("Content has changed!")
+            return current_content
         elif not previous_content:
-            return current_content  # First check, return current content
+            return current_content
         else:
-            print("No changes detected in the container.")
-            return previous_content  # No change detected
+            logging.info("No changes detected in the container.")
+            return previous_content
     except NoSuchElementException:
-        print("Container not found!")
+        logging.error("Container not found!")
         return previous_content
     except Exception as e:
-        print(f"Error monitoring container change: {e}")
+        logging.error(f"Error monitoring container change: {e}")
         return previous_content
 
-
+# Function to scrape the job information for an ID number
 # Function to scrape the job information for an ID number
 def get_job_info(driver, id_number):
     try:
-        print(f"Attempting to find the input field for ID: {id_number}")
+        logging.info(f"Attempting to find the input field for ID: {id_number}")
 
-        # Wait for the input field to be visible with a 1-minute timeout
-        input_field = WebDriverWait(driver, 120).until(
-            EC.visibility_of_element_located((By.ID, "idNumber"))  # Wait for input field to appear
+        # Wait for the input field to be visible
+        input_field = WebDriverWait(driver, 60).until(
+            EC.visibility_of_element_located((By.ID, "idNumber"))
         )
-
-        print("Input field found.")
-
-        # Monitor container for changes before interaction
-        previous_content = None
-        previous_content = monitor_container_change(driver, "#content-body", previous_content)
+        logging.info("Input field found.")
 
         # Find the input field and enter the ID number
         input_field.clear()
         input_field.send_keys(id_number)
 
-        # Find and click the submit button (Verify) with a 1-minute timeout
+        # Wait for the submit button to be clickable and click it
         verify_button = WebDriverWait(driver, 60).until(
-            EC.element_to_be_clickable((By.ID, "Inputfield_submit"))  # Button ID for Submit
+            EC.element_to_be_clickable((By.ID, "Inputfield_submit"))
         )
-        print("Submit button found and clicked.")
+        logging.info("Submit button found and clicked.")
         verify_button.click()
 
-        # Wait for the response to appear with a 1-minute timeout
-        try:
-            print("Waiting for response...")
-            WebDriverWait(driver, 60).until(
-                EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, ".uk-text-danger.uk-panel.uk-primary")
-                )  # Wait for the response div containing the text
-            )
-
-            # Monitor container for changes after submission
-            previous_content = monitor_container_change(driver, "#content-body", previous_content)
-
-            # Check if the text matches the expected response
-            response_element = driver.find_element(By.CSS_SELECTOR, ".uk-text-danger.uk-panel.uk-primary")
-            if "Not a Public Servant" in response_element.text:
-                print(f"Response for ID {id_number}: {response_element.text}")
-            else:
-                print(f"Unexpected response for ID {id_number}: {response_element.text}")
-
-        except TimeoutException:
-            print(f"Timeout occurred while waiting for response for ID: {id_number}. Attempting a page refresh.")
-            driver.refresh()  # Refresh page if timeout occurs
-
-        # Check for any URL or DOM change after clicking the submit button
-        current_url = driver.current_url
-        print(f"Current URL after submitting ID: {current_url}")
-        time.sleep(5)  # Wait for the page to fully load the response
-
-        # Monitor container for changes after the page reloads
-        previous_content = monitor_container_change(driver, "#content-body", previous_content)
-
-        # Refresh the page after processing the current ID to reset the input field for the next ID
-        print(f"Refreshing the page after processing ID {id_number}.")
-        driver.refresh()
-
-        # Wait for the page to reload completely before the next ID can be processed
+        # Wait for the response to appear (either successful or error response)
         WebDriverWait(driver, 60).until(
-            EC.visibility_of_element_located((By.ID, "idNumber"))  # Ensure input field is ready again
+            EC.presence_of_element_located((By.CSS_SELECTOR, ".uk-text-center"))
         )
-        print("Page refreshed and ready for next ID.")
-        return "Processed"
+        logging.info("Response div found.")
 
-    except (NoSuchElementException, TimeoutException) as e:
-        print(f"Error while processing ID {id_number}: Element not found or timeout occurred. Error: {e}")
-        return "Error"
+        # Check if the response div has the 'uk-text-danger' class for "Not a Public Servant"
+        try:
+            response_div = driver.find_element(By.CSS_SELECTOR, ".uk-text-danger.uk-panel.uk-primary")
+            logging.info(f"Response for ID {id_number}: Not a Public Servant")
+            result_text = f"{id_number} - Not a Public Servant"
+        except NoSuchElementException:
+            # If not found, assume it's a valid response (i.e., successful)
+            response_div = driver.find_element(By.CSS_SELECTOR, ".uk-text-success.uk-panel.uk-primary")
+            result_text = response_div.text.strip()
+            logging.info(f"Response for ID {id_number}: {result_text}")
+
+        # Click "Do another search" button to reset the form
+        do_another_search_button = WebDriverWait(driver, 60).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "a.uk-button.uk-button-primary.uk-grid-margin"))
+        )
+        do_another_search_button.click()
+        logging.info("Form reset successfully.")
+
+        # Wait for the input field to be visible again after reset
+        WebDriverWait(driver, 60).until(
+            EC.visibility_of_element_located((By.ID, "idNumber"))
+        )
+
+        return result_text
+
+    except TimeoutException:
+        logging.error(f"Timeout occurred while waiting for response for ID: {id_number}.")
+        driver.refresh()
+        return "Error: Timeout"
+
+    except NoSuchElementException as e:
+        logging.error(f"Element not found for ID {id_number}: {e}")
+        return "Error: Element not found"
 
     except WebDriverException as e:
-        print(f"WebDriver error while processing ID {id_number}: {e}")
-        return "Error"
+        logging.error(f"WebDriver error while processing ID {id_number}: {e}")
+        return "Error: WebDriver"
 
     except Exception as e:
-        print(f"Unexpected error while processing ID {id_number}: {e}")
-        return "Error"
-
+        logging.error(f"Unexpected error while processing ID {id_number}: {e}")
+        return "Error: Unexpected error"
 
 # Function to process the ID numbers and save the result to an Excel file
 def process_ids(input_file, output_file):
@@ -145,28 +137,27 @@ def process_ids(input_file, output_file):
 
         # Loop through the ID numbers and scrape the data
         for id_number in id_numbers:
-            print(f"Processing ID: {id_number}")
+            logging.info(f"Processing ID: {id_number}")
             result = get_job_info(driver, id_number)
             results.append({"ID Number": id_number, "Result": result})
 
-            if result == "Error":
-                print(f"Skipping ID: {id_number} due to error.")
-            time.sleep(2)  # Adjust the sleep time to allow enough time between searches
+            if result == "Error: Timeout":
+                logging.warning(f"Skipping ID {id_number} due to timeout.")
+            time.sleep(2)
 
         # Save results to an Excel file
         results_df = pd.DataFrame(results)
         results_df.to_excel(output_file, index=False)
-        print(f"Results saved to {output_file}")
+        logging.info(f"Results saved to {output_file}")
 
         driver.quit()
 
     except FileNotFoundError as e:
-        print(f"Error: The input file was not found. Please check the file path. Error: {e}")
+        logging.error(f"Error: The input file was not found. Error: {e}")
     except PermissionError as e:
-        print(f"Error: Permission denied while accessing the file. Error: {e}")
+        logging.error(f"Error: Permission denied while accessing the file. Error: {e}")
     except Exception as e:
-        print(f"Unexpected error while processing the file: {e}")
-
+        logging.error(f"Unexpected error while processing the file: {e}")
 
 # Main function
 if __name__ == "__main__":
@@ -175,6 +166,6 @@ if __name__ == "__main__":
 
     try:
         process_ids(input_file, output_file)
-        print("Scraping completed.")
+        logging.info("Scraping completed.")
     except Exception as e:
-        print(f"An error occurred during scraping: {e}")
+        logging.error(f"An error occurred during scraping: {e}")
